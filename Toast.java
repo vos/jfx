@@ -66,11 +66,13 @@ public class Toast extends PopupControl {
 
     private Node content;
     private int duration;
+    private boolean autoCenter = true;
 
-    // only used when the toast is queued
     private Window window;
     private double screenX;
     private double screenY;
+    private double offsetX;
+    private double offsetY;
 
     private double contentOpacity = defaultContentOpacity;
     private int fadeInTime = defaultFadeInTime;
@@ -78,6 +80,7 @@ public class Toast extends PopupControl {
 
     public Toast() {
         getStyleClass().add("toast");
+        setAutoHide(true);
     }
 
     public void setContent(Node content) {
@@ -97,6 +100,60 @@ public class Toast extends PopupControl {
 
     public void setDuration(int duration) {
         this.duration = duration;
+        if (duration == LENGTH_INFINITE) {
+            setAutoHide(false);
+        }
+    }
+
+    public boolean isAutoCenter() {
+        return autoCenter;
+    }
+
+    public void setAutoCenter(boolean autoCenter) {
+        this.autoCenter = autoCenter;
+    }
+
+    public Window getWindow() {
+        return window;
+    }
+
+    public void setWindow(Window window) {
+        if (window == null) {
+            throw new NullPointerException();
+        }
+        this.window = window;
+    }
+
+    public double getScreenX() {
+        return screenX;
+    }
+
+    public void setScreenX(double screenX) {
+        this.screenX = screenX;
+    }
+
+    public double getScreenY() {
+        return screenY;
+    }
+
+    public void setScreenY(double screenY) {
+        this.screenY = screenY;
+    }
+
+    public double getOffsetX() {
+        return offsetX;
+    }
+
+    public void setOffsetX(double offsetX) {
+        this.offsetX = offsetX;
+    }
+
+    public double getOffsetY() {
+        return offsetY;
+    }
+
+    public void setOffsetY(double offsetY) {
+        this.offsetY = offsetY;
     }
 
     public double getContentOpacity() {
@@ -123,62 +180,68 @@ public class Toast extends PopupControl {
         this.fadeOutTime = fadeOutTime;
     }
 
-    private void doShow(final Window window, double screenX, double screenY) {
+    private void doShow() {
         log.trace("show toast: {}", this);
-        timer.schedule(new TimerTask() {
-            @Override
-            public void run() {
-                Toast.this.hide();
-            }
-        }, duration - fadeOutTime);
+
+        if (autoCenter) {
+            XListener xListener = new XListener();
+            super.widthProperty().addListener(xListener);
+//            window.xProperty().addListener(xListener);
+//            window.widthProperty().addListener(xListener);
+
+            YListener yListener = new YListener();
+            super.heightProperty().addListener(yListener);
+//            window.yProperty().addListener(yListener);
+//            window.heightProperty().addListener(yListener);
+        }
+
+        if (isAutoHide()) {
+            timer.schedule(new TimerTask() {
+                @Override
+                public void run() {
+                    // TODO check if already hidden through auto hide before this timer fires
+                    Toast.this.hide();
+                }
+            }, duration - fadeOutTime);
+        }
 
         FadeTransition transition = new FadeTransition(Duration.millis(fadeInTime), content);
         transition.setFromValue(0.0);
         transition.setToValue(contentOpacity);
         transition.play();
+
         super.show(window, screenX, screenY);
     }
 
-    @Override
-    public void show(final Window window, double screenX, double screenY) {
+    // show can't be overridden without side effects
+    public void showToast() {
+        if (window == null) {
+            throw new IllegalStateException("window is null");
+        }
         if (showing) {
             // if another toast is already showing add this one to the waiting queue
             if (toastQueue.offer(this)) {
-                this.window = window;
-                this.screenX = screenX;
-                this.screenY = screenY;
                 log.debug("toast queued: {}", this);
             } else {
                 log.error("toast queue exceeded it's capacity");
             }
-            return;
+        } else {
+            showing = true;
+            doShow();
         }
-        showing = true;
-        doShow(window, screenX, screenY);
     }
 
-    public void showCentered(final Window window, final double offsetX, final double offsetY) {
-        if (window == null) {
-            throw new NullPointerException("window");
-        }
-
-        // TODO attach listeners only when showing and not in waiting queue
-        XListener xListener = new XListener(window, offsetX);
-        super.widthProperty().addListener(xListener);
-        window.xProperty().addListener(xListener);
-        window.widthProperty().addListener(xListener);
-
-        YListener yListener = new YListener(window, offsetY);
-        super.heightProperty().addListener(yListener);
-        window.yProperty().addListener(yListener);
-        window.heightProperty().addListener(yListener);
-
-        this.show(window, 0, 0);
+    @Override
+    public void show(Window window, double screenX, double screenY) {
+        setWindow(window);
+        setScreenX(screenX);
+        setScreenY(screenY);
+        this.showToast();
     }
 
     @Override
     public void show(Window window) {
-        this.showCentered(window, 0, 0);
+        this.show(window, 0, 0);
     }
 
     @Override
@@ -187,13 +250,8 @@ public class Toast extends PopupControl {
         this.show(window, screenX, screenY);
     }
 
-    public void showCentered(Node node, double offsetX, double offsetY) {
-        Window window = getWindow(node);
-        this.showCentered(window, offsetX, offsetY);
-    }
-
     public void show(Node node) {
-        this.showCentered(node, 0, 0);
+        this.show(node, 0, 0);
     }
 
     private Window getWindow(Node node) {
@@ -210,24 +268,28 @@ public class Toast extends PopupControl {
 
     @Override
     public void hide() {
+        log.trace("hide toast: {}", this);
         FadeTransition transition = new FadeTransition(Duration.millis(fadeOutTime), content);
         transition.setToValue(0.0);
         transition.setOnFinished(new EventHandler<ActionEvent>() {
             @Override
             public void handle(ActionEvent event) {
-                log.trace("hide toast: {}", Toast.this);
-                Toast.super.hide();
-                if (toastQueue.isEmpty()) {
-                    showing = false;
-                } else {
-                    // get the next toast and show it
-                    Toast toast = toastQueue.poll();
-                    log.debug("toast unqueued: {}", toast);
-                    toast.doShow(toast.window, toast.screenX, toast.screenY);
-                }
+                doHide();
             }
         });
         transition.play();
+    }
+
+    private void doHide() {
+        super.hide();
+        if (toastQueue.isEmpty()) {
+            showing = false;
+        } else {
+            // get the next toast and show it
+            Toast toast = toastQueue.poll();
+            log.debug("toast unqueued: {}", toast);
+            toast.doShow();
+        }
     }
 
     @Override
@@ -243,6 +305,7 @@ public class Toast extends PopupControl {
 
     public static final int LENGTH_SHORT = 2000;
     public static final int LENGTH_LONG = 4000;
+    public static final int LENGTH_INFINITE = Integer.MAX_VALUE;
 
     private static final Color DEFAULT_BACKGROUND_COLOR = new Color(0.2, 0.2, 0.2, 1);
     private static final double DEFAULT_BACKGROUND_ARC = 8.0;
@@ -284,14 +347,6 @@ public class Toast extends PopupControl {
     }
 
     private class XListener implements ChangeListener<Number> {
-        private final Window window;
-        private final double offsetX;
-
-        public XListener(Window window, double offsetX) {
-            this.window = window;
-            this.offsetX = offsetX;
-        }
-
         @Override
         public void changed(ObservableValue<? extends Number> observableValue, Number number, Number number2) {
             Toast.super.setX(window.getX() + window.getWidth() / 2 - Toast.super.getWidth() / 2 + offsetX);
@@ -299,14 +354,6 @@ public class Toast extends PopupControl {
     }
 
     private class YListener implements ChangeListener<Number> {
-        private final Window window;
-        private final double offsetY;
-
-        public YListener(Window window, double offsetY) {
-            this.window = window;
-            this.offsetY = offsetY;
-        }
-
         @Override
         public void changed(ObservableValue<? extends Number> observableValue, Number number, Number number2) {
             Toast.super.setY(window.getY() + window.getHeight() / 2 - Toast.super.getHeight() / 2 + offsetY);
