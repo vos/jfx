@@ -1,6 +1,7 @@
-package de.vossoft.jfx.control;
+package net.toucheye.client.fx.control;
 
 import javafx.animation.FadeTransition;
+import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
 import javafx.collections.ObservableList;
@@ -64,6 +65,12 @@ public class Toast extends PopupControl {
     private static volatile boolean showing = false;
     private static final Queue<Toast> toastQueue = new LinkedBlockingQueue<>(50);
 
+    public static int clearWaitingToasts() {
+        int count = toastQueue.size();
+        toastQueue.clear();
+        return count;
+    }
+
     private Node content;
     private int duration;
     private boolean autoCenter = true;
@@ -77,6 +84,8 @@ public class Toast extends PopupControl {
     private double contentOpacity = defaultContentOpacity;
     private int fadeInTime = defaultFadeInTime;
     private int fadeOutTime = defaultFadeOutTime;
+
+    private TimerTask timerTask;
 
     public Toast() {
         getStyleClass().add("toast");
@@ -99,10 +108,10 @@ public class Toast extends PopupControl {
     }
 
     public void setDuration(int duration) {
-        this.duration = duration;
-        if (duration == LENGTH_INFINITE) {
-            setAutoHide(false);
+        if (duration <= 0) {
+            throw new IllegalArgumentException("duration must be positive");
         }
+        this.duration = duration;
     }
 
     public boolean isAutoCenter() {
@@ -195,14 +204,20 @@ public class Toast extends PopupControl {
 //            window.heightProperty().addListener(yListener);
         }
 
-        if (isAutoHide()) {
-            timer.schedule(new TimerTask() {
+        if (isAutoHide() && duration > 0 && duration != LENGTH_INFINITE) {
+            timerTask = new TimerTask() {
                 @Override
                 public void run() {
-                    // TODO check if already hidden through auto hide before this timer fires
-                    Toast.this.hide();
+                    timerTask = null;
+                    Platform.runLater(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.this.hide();
+                        }
+                    });
                 }
-            }, duration - fadeOutTime);
+            };
+            timer.schedule(timerTask, duration);
         }
 
         FadeTransition transition = new FadeTransition(Duration.millis(fadeInTime), content);
@@ -221,7 +236,7 @@ public class Toast extends PopupControl {
         if (showing) {
             // if another toast is already showing add this one to the waiting queue
             if (toastQueue.offer(this)) {
-                log.debug("toast queued: {}", this);
+                log.debug("toast enqueued: {}", this);
             } else {
                 log.error("toast queue exceeded it's capacity");
             }
@@ -269,6 +284,11 @@ public class Toast extends PopupControl {
     @Override
     public void hide() {
         log.trace("hide toast: {}", this);
+        if (timerTask != null) {
+            // cancel the timer if the toast is hidden before it can fire
+            timerTask.cancel();
+            timerTask = null;
+        }
         FadeTransition transition = new FadeTransition(Duration.millis(fadeOutTime), content);
         transition.setToValue(0.0);
         transition.setOnFinished(new EventHandler<ActionEvent>() {
@@ -285,10 +305,15 @@ public class Toast extends PopupControl {
         if (toastQueue.isEmpty()) {
             showing = false;
         } else {
-            // get the next toast and show it
-            Toast toast = toastQueue.poll();
+            // get the next toast and show it (may flicker if not enqueued in the FX thread!?)
+            final Toast toast = toastQueue.poll();
             log.debug("toast unqueued: {}", toast);
-            toast.doShow();
+            Platform.runLater(new Runnable() {
+                @Override
+                public void run() {
+                    toast.doShow();
+                }
+            });
         }
     }
 
