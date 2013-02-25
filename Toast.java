@@ -1,27 +1,26 @@
 import com.sun.javafx.Utils;
 import javafx.animation.FadeTransition;
+import javafx.animation.KeyFrame;
+import javafx.animation.Timeline;
 import javafx.application.Platform;
 import javafx.beans.value.ChangeListener;
 import javafx.beans.value.ObservableValue;
-import javafx.collections.ObservableList;
 import javafx.event.ActionEvent;
 import javafx.event.EventHandler;
 import javafx.geometry.*;
 import javafx.scene.Node;
 import javafx.scene.Scene;
 import javafx.scene.control.Label;
-import javafx.scene.control.PopupControl;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 import javafx.scene.shape.Rectangle;
+import javafx.stage.Popup;
 import javafx.stage.Window;
 import javafx.util.Duration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.Queue;
-import java.util.Timer;
-import java.util.TimerTask;
 import java.util.concurrent.LinkedBlockingQueue;
 
 /**
@@ -29,38 +28,43 @@ import java.util.concurrent.LinkedBlockingQueue;
  * Date: 19.02.13
  * Time: 23:35
  */
-public class Toast extends PopupControl {
+public class Toast extends Popup {
     private static final Logger log = LoggerFactory.getLogger(Toast.class);
 
     private static double defaultContentOpacity = 0.9;
-    private static int defaultFadeInTime = 600;
-    private static int defaultFadeOutTime = 300;
+    private static Duration defaultFadeInDuration = new Duration(600);
+    private static Duration defaultFadeOutDuration = new Duration(300);
 
     public static double getDefaultContentOpacity() {
         return defaultContentOpacity;
     }
 
-    public static void setDefaultContentOpacity(double defaultContentOpacity) {
-        Toast.defaultContentOpacity = defaultContentOpacity;
+    public static void setDefaultContentOpacity(double opacity) {
+        Toast.defaultContentOpacity = opacity;
     }
 
-    public static int getDefaultFadeInTime() {
-        return defaultFadeInTime;
+    public static Duration getDefaultFadeInDuration() {
+        return defaultFadeInDuration;
     }
 
-    public static void setDefaultFadeInTime(int defaultFadeInTime) {
-        Toast.defaultFadeInTime = defaultFadeInTime;
+    public static void setDefaultFadeInDuration(Duration duration) {
+        if (duration == null) {
+            throw new NullPointerException();
+        }
+        Toast.defaultFadeInDuration = duration;
     }
 
-    public static int getDefaultFadeOutTime() {
-        return defaultFadeOutTime;
+    public static Duration getDefaultFadeOutDuration() {
+        return defaultFadeOutDuration;
     }
 
-    public static void setDefaultFadeOutTime(int defaultFadeOutTime) {
-        Toast.defaultFadeOutTime = defaultFadeOutTime;
+    public static void setDefaultFadeOutDuration(Duration duration) {
+        if (duration == null) {
+            throw new NullPointerException();
+        }
+        Toast.defaultFadeOutDuration = duration;
     }
 
-    private static final Timer timer = new Timer("Toast-Timer", true);
     private static volatile boolean alreadyShowing = false;
     private static final Queue<Toast> toastQueue = new LinkedBlockingQueue<>(50);
 
@@ -71,7 +75,7 @@ public class Toast extends PopupControl {
     }
 
     private Node content;
-    private int duration;
+    private Duration duration;
     private boolean autoCenter = true;
 
     private Window window;
@@ -80,13 +84,12 @@ public class Toast extends PopupControl {
     private double screenY;
 
     private double contentOpacity = defaultContentOpacity;
-    private int fadeInTime = defaultFadeInTime;
-    private int fadeOutTime = defaultFadeOutTime;
+    private Duration fadeInDuration = defaultFadeInDuration;
+    private Duration fadeOutDuration = defaultFadeOutDuration;
 
-    private TimerTask timerTask;
+    private Timeline hideTimer;
 
     public Toast() {
-        getStyleClass().add("toast");
         setAutoHide(true);
     }
 
@@ -96,19 +99,16 @@ public class Toast extends PopupControl {
         }
         this.content = content;
         content.getStyleClass().add("toast");
-        content.getStyleClass().add("content");
-        ObservableList<Node> nodes = super.getContent(); // TODO how to set the content?
-        nodes.clear();
-        nodes.add(content);
+        super.getContent().setAll(content);
     }
 
-    public int getDuration() {
+    public Duration getDuration() {
         return duration;
     }
 
-    public void setDuration(int duration) {
-        if (duration <= 0) {
-            throw new IllegalArgumentException("duration must be positive");
+    public void setDuration(Duration duration) {
+        if (duration == null) {
+            throw new NullPointerException();
         }
         this.duration = duration;
     }
@@ -125,24 +125,30 @@ public class Toast extends PopupControl {
         return contentOpacity;
     }
 
-    public void setContentOpacity(double contentOpacity) {
-        this.contentOpacity = contentOpacity;
+    public void setContentOpacity(double opacity) {
+        this.contentOpacity = opacity;
     }
 
-    public int getFadeInTime() {
-        return fadeInTime;
+    public Duration getFadeInDuration() {
+        return fadeInDuration;
     }
 
-    public void setFadeInTime(int fadeInTime) {
-        this.fadeInTime = fadeInTime;
+    public void setFadeInDuration(Duration duration) {
+        if (duration == null) {
+            throw new NullPointerException();
+        }
+        this.fadeInDuration = duration;
     }
 
-    public int getFadeOutTime() {
-        return fadeOutTime;
+    public Duration getFadeOutDuration() {
+        return fadeOutDuration;
     }
 
-    public void setFadeOutTime(int fadeOutTime) {
-        this.fadeOutTime = fadeOutTime;
+    public void setFadeOutDuration(Duration duration) {
+        if (duration == null) {
+            throw new NullPointerException();
+        }
+        this.fadeOutDuration = duration;
     }
 
     @Override
@@ -188,7 +194,7 @@ public class Toast extends PopupControl {
         HPos hpos = side == Side.LEFT ? HPos.LEFT : side == Side.RIGHT ? HPos.RIGHT : HPos.CENTER;
         VPos vpos = side == Side.TOP ? VPos.TOP : side == Side.BOTTOM ? VPos.BOTTOM : VPos.CENTER;
         // translate from anchor/hpos/vpos/offsetX/offsetY into screenX/screenY
-        Point2D point = Utils.pointRelativeTo(anchor, prefWidth(-1), prefHeight(-1), hpos, vpos, offsetX, offsetY, true);
+        Point2D point = Utils.pointRelativeTo(anchor, content.prefWidth(-1), content.prefHeight(-1), hpos, vpos, offsetX, offsetY, true);
         this.show(anchor, point.getX(), point.getY());
     }
 
@@ -237,22 +243,18 @@ public class Toast extends PopupControl {
             }
             super.show(anchor, Double.isNaN(screenX) ? 0.0 : screenX, Double.isNaN(screenY) ? 0.0 : screenY);
         }
-        if (isAutoHide() && duration > 0 && duration != LENGTH_INFINITE) {
-            timerTask = new TimerTask() {
+        if (isAutoHide() && !duration.isIndefinite()) {
+            hideTimer = new Timeline(new KeyFrame(duration));
+            hideTimer.setOnFinished(new EventHandler<ActionEvent>() {
                 @Override
-                public void run() {
-                    timerTask = null;
-                    Platform.runLater(new Runnable() {
-                        @Override
-                        public void run() {
-                            Toast.this.hide();
-                        }
-                    });
+                public void handle(ActionEvent event) {
+                    hideTimer = null;
+                    Toast.this.hide();
                 }
-            };
-            timer.schedule(timerTask, duration);
+            });
+            hideTimer.playFromStart();
         }
-        FadeTransition transition = new FadeTransition(Duration.millis(fadeInTime), content);
+        FadeTransition transition = new FadeTransition(fadeInDuration, content);
         transition.setFromValue(0.0);
         transition.setToValue(contentOpacity);
         transition.play();
@@ -268,15 +270,15 @@ public class Toast extends PopupControl {
     @Override
     public void hide() {
         log.trace("hide toast: {}", this);
-        if (timerTask != null) {
-            // cancel the timer if the toast is hidden before it can fire
-            timerTask.cancel();
-            timerTask = null;
+        if (hideTimer != null) {
+            // cancel the timer if the toast is hidden before the timer fires
+            hideTimer.stop();
+            hideTimer = null;
         }
         if (!isShowing()) {
             return;
         }
-        FadeTransition transition = new FadeTransition(Duration.millis(fadeOutTime), content);
+        FadeTransition transition = new FadeTransition(fadeOutDuration, content);
         transition.setToValue(0.0);
         transition.setOnFinished(new EventHandler<ActionEvent>() {
             @Override
@@ -315,15 +317,21 @@ public class Toast extends PopupControl {
 
     // helper methods
 
-    public static final int LENGTH_SHORT = 2000;
-    public static final int LENGTH_LONG = 4000;
-    public static final int LENGTH_INFINITE = Integer.MAX_VALUE;
+    public static final Duration DURATION_SHORT = Duration.seconds(2);
+    public static final Duration DURATION_LONG = Duration.seconds(4);
 
-    private static final Color DEFAULT_BACKGROUND_COLOR = new Color(0.2, 0.2, 0.2, 1);
+    private static final Color DEFAULT_BACKGROUND_COLOR = Color.gray(0.2);
     private static final double DEFAULT_BACKGROUND_ARC = 8.0;
     private static final Insets DEFAULT_CONTENT_MARGIN = new Insets(8, 16, 8, 16);
 
-    public static Toast makeToast(Node content, int duration) {
+    public static Toast makeToast(Node content, Duration duration) {
+        if (content == null) {
+            throw new NullPointerException("content");
+        }
+        if (duration == null) {
+            throw new NullPointerException("duration");
+        }
+
         Rectangle rect = new Rectangle();
         rect.getStyleClass().add("background");
         rect.setFill(DEFAULT_BACKGROUND_COLOR);
@@ -344,7 +352,7 @@ public class Toast extends PopupControl {
 
     private static final Color DEFAULT_FILL_COLOR = Color.WHITE;
 
-    public static Toast makeText(String text, boolean wrapText, double maxWidth, double maxHeight, int duration) {
+    public static Toast makeText(String text, boolean wrapText, double maxWidth, double maxHeight, Duration duration) {
         Label label = new Label(text);
         label.getStyleClass().add("text");
         label.setWrapText(wrapText);
@@ -354,7 +362,7 @@ public class Toast extends PopupControl {
         return makeToast(label, duration);
     }
 
-    public static Toast makeText(String text, int duration) {
+    public static Toast makeText(String text, Duration duration) {
         return makeText(text, true, 500, 250, duration);
     }
 
